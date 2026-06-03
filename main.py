@@ -34,18 +34,18 @@ def main():
 
 def neural_net(data: np.ndarray):
     hidden_layer_neurons = 6
-    input_count = data.shape[1] - 1 # -1 since the last column is the ground truth
+    hidden_layer_count = 2
 
+    feature_count = data.shape[1] - 1 # -1 since the last column is y
+    y = data[:, -1]
     rng = default_rng(67)
-
     weight_layers = []
     bias_layers = []
 
-    weight_layers.append(rng.uniform(low=-1, high=1, size=(hidden_layer_neurons, input_count)))
-    bias_layers.append(rng.uniform(low=-1, high=1, size=hidden_layer_neurons))
-
-    weight_layers.append(rng.uniform(low=-1, high=1, size=(hidden_layer_neurons, hidden_layer_neurons)))
-    bias_layers.append(rng.uniform(low=-1, high=1, size=hidden_layer_neurons))
+    for i in range(hidden_layer_count):
+        inputs = hidden_layer_neurons if i > 0 else feature_count
+        weight_layers.append(rng.uniform(low=-1, high=1, size=(hidden_layer_neurons, inputs)))
+        bias_layers.append(rng.uniform(low=-1, high=1, size=hidden_layer_neurons))
 
     weight_layers.append(rng.uniform(low=-1, high=1, size=(1, hidden_layer_neurons)))
     bias_layers.append(np.array([0.67]))
@@ -56,7 +56,7 @@ def neural_net(data: np.ndarray):
         x = data[:, :2]
         out = x.T
         layers = len(weight_layers)
-        pre_activ_layer_outputs = []
+        z_layers = []
 
         for j in range(layers):
             input = out
@@ -64,57 +64,59 @@ def neural_net(data: np.ndarray):
             biases = bias_layers[j]
             out = weights @ input + biases[:, np.newaxis]
 
-            pre_activ_layer_outputs.append(out.copy())
+            z_layers.append(out.copy())
 
             if j == layers - 1:
                 out = sigmoid(out)
             else:
                 out = np.tanh(out)
 
-        out = np.squeeze(out)
-
-
-        L = loss(data[:, -1], out)
-
-        if i % 50 == 0:
-            print(f"{i}. Loss: {L}")
 
         # Backward Pass
         
-        gt = data[:, -1]
-        weight_grads = []
-        bias_grads = []
+        w_grads = []
+        b_grads = []
+        a_in_grad = np.empty
 
-        # z = pre activiation
-        z_grad = (sigmoid(pre_activ_layer_outputs[-1]) - gt) / data.shape[0]
-        bias_grads.insert(0, z_grad.sum())
-        weight_grads.insert(0, z_grad @ np.tanh(pre_activ_layer_outputs[-2]).T)
-        x_grad = z_grad.T @ weight_layers[-1]
+        #
+        for li in reversed(range(hidden_layer_count + 1)):
+            if li == hidden_layer_count:
+                z_grad = (sigmoid(z_layers[li]) - y) / data.shape[0]
+                z_grad = z_grad.T
+            else:
+                z_grad = tanh_gradient(z_layers[li].T) * a_in_grad
 
-        z_grad = (1 - np.square(np.tanh(pre_activ_layer_outputs[-2].T))) * x_grad
-        bias_grads.insert(0, z_grad.sum(axis=0))
-        weight_grads.insert(0, z_grad.T @ np.tanh(pre_activ_layer_outputs[-3]).T)
-        x_grad = z_grad @ weight_layers[-2]
+            b_grads.insert(0, z_grad.sum(axis=0))
 
-        z_grad = (1 - np.square(np.tanh(pre_activ_layer_outputs[-3].T))) * x_grad
-        bias_grads.insert(0, z_grad.sum(axis=0))
-        weight_grads.insert(0, z_grad.T @ x)
+            if li > 0:
+                a_prev = np.tanh(z_layers[li - 1]).T
+                a_in_grad = z_grad @ weight_layers[li]
+            else:
+                a_prev = x
+
+            w_grads.insert(0, z_grad.T @ a_prev)
 
         # Apply
 
         lr = 3
 
-        for i in range(len(bias_grads)):
-            bias_layers[i] -= bias_grads[i] * lr
+        if i % 50 == 0:
+            out = np.squeeze(out)
+            L = loss(data[:, -1], out)
+            print(f"{i}. Loss: {L}")
 
-        for i in range(len(weight_grads)):
-            weight_layers[i] -= weight_grads[i] * lr
+        for i in range(len(b_grads)):
+            bias_layers[i] -= b_grads[i] * lr
 
-    print(out)
+        for i in range(len(w_grads)):
+            weight_layers[i] -= w_grads[i] * lr
 
 # Binary Cross Entropy
 def loss(gt: np.ndarray, out: np.ndarray) -> float:
     return -(gt * np.log(out) + (1 - gt) * np.log(1 - out)).mean()
+
+def tanh_gradient(v: np.ndarray) -> np.ndarray:
+    return (1 - np.square(np.tanh(v)))
 
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
