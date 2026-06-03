@@ -74,9 +74,8 @@ def neural_net(data: np.ndarray):
 
         # Backward Pass
         
-        w_grads = []
-        b_grads = []
         a_in_grad = np.empty
+        lr = 3
 
         #
         for li in reversed(range(hidden_layer_count + 1)):
@@ -86,7 +85,8 @@ def neural_net(data: np.ndarray):
             else:
                 z_grad = tanh_gradient(z_layers[li].T) * a_in_grad
 
-            b_grads.insert(0, z_grad.sum(axis=0))
+            b_grad = z_grad.sum(axis=0)
+            bias_layers[li] -= b_grad * lr
 
             if li > 0:
                 a_prev = np.tanh(z_layers[li - 1]).T
@@ -94,22 +94,13 @@ def neural_net(data: np.ndarray):
             else:
                 a_prev = x
 
-            w_grads.insert(0, z_grad.T @ a_prev)
-
-        # Apply
-
-        lr = 3
+            w_grad = z_grad.T @ a_prev
+            weight_layers[li] -= w_grad * lr
 
         if i % 50 == 0:
             out = np.squeeze(out)
             L = loss(data[:, -1], out)
             print(f"{i}. Loss: {L}")
-
-        for i in range(len(b_grads)):
-            bias_layers[i] -= b_grads[i] * lr
-
-        for i in range(len(w_grads)):
-            weight_layers[i] -= w_grads[i] * lr
 
 # Binary Cross Entropy
 def loss(gt: np.ndarray, out: np.ndarray) -> float:
