@@ -12,8 +12,9 @@ N = 5000
 BATCH_SIZE = 120
 EPOCHS = 200
 VALIDATION_SET_PERCENT = 0.2
-EPOCHS_PATIENCE = 3
+EPOCHS_PATIENCE = 10
 LR = 0.5
+MOMENTUM_BETA = 0.9
 LR_DECAY_RATE = 0.0001
 HIDDEN_LAYERS = 2
 HIDDEN_LAYER_NEURONS = 6
@@ -49,11 +50,13 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
     hidden_layer_count = HIDDEN_LAYERS
 
     feature_count = data.shape[1] - 1 # -1 since the last column is y
-    x = data[:, :2]
+    x = data[:, :feature_count]
     y = data[:, -1]
     rng = default_rng(67)
     weights = []
     biases = []
+    v_weights = []
+    v_biases = []
 
     best_weights = []
     best_biases = []
@@ -70,8 +73,14 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
         weights.append(rng.standard_normal((hidden_layer_neurons, inputs)) * np.sqrt(2.0 / inputs))
         biases.append(np.zeros(hidden_layer_neurons, dtype=np.float64))
 
+        v_weights.append(np.zeros((hidden_layer_neurons, inputs)))
+        v_biases.append(np.zeros(hidden_layer_neurons, dtype=np.float64))
+
     weights.append(rng.standard_normal((1, hidden_layer_neurons)) * np.sqrt(2.0 / hidden_layer_neurons))
     biases.append(np.array([0], dtype=np.float64))
+
+    v_weights.append(np.zeros((1, hidden_layer_neurons)))
+    v_biases.append(np.array([0], dtype=np.float64))
 
     # Training
 
@@ -108,16 +117,18 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
                 z_grad = relu_gradient(z_layers[li].T) * a_in_grad
 
             b_grad = z_grad.sum(axis=0)
-            biases[li] -= b_grad * lr
+            v_biases[li] = MOMENTUM_BETA * v_biases[li] + (1 - MOMENTUM_BETA) * b_grad
+            biases[li] -= lr * v_biases[li]
 
             if li > 0:
                 a_prev = np.maximum(0, z_layers[li - 1]).T
                 a_in_grad = z_grad @ weights[li]
             else:
                 a_prev = batch_x
-            w_grad = z_grad.T @ a_prev
 
-            weights[li] -= w_grad * lr
+            w_grad = z_grad.T @ a_prev
+            v_weights[li] = MOMENTUM_BETA * v_weights[li] + (1 - MOMENTUM_BETA) * w_grad
+            weights[li] -= lr * v_weights[li]
 
         # New Loss
         out = np.squeeze(out)
@@ -172,6 +183,8 @@ def forward_pass(x: np.ndarray, weights: list[np.ndarray], biases: list[np.ndarr
 
 # Binary Cross Entropy
 def loss(gt: np.ndarray, out: np.ndarray) -> float:
+    epsilon = 1e-15
+    out = np.clip(out, epsilon, 1 - epsilon)
     return -(gt * np.log(out) + (1 - gt) * np.log(1 - out)).mean()
 
 def relu_gradient(v: np.ndarray) -> np.ndarray:
@@ -181,7 +194,7 @@ def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
 def logit(x):
-    return np.log(x / 1-x)
+    return np.log(x / (1-x))
 
 def main():
     fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(18, 8))
