@@ -1,3 +1,4 @@
+import copy
 import math
 
 import sklearn
@@ -8,7 +9,13 @@ from pydantic import BaseModel
 from pydantic_numpy.typing import NpNDArray
 
 N = 5000
-STEPS = 1000000
+VALIDATION_SET_PERCENT = 0.2
+STEPS = 50000
+PATIENCE = 150
+LR = 0.01
+LR_DECAY_RATE = 0.0001
+HIDDEN_LAYERS = 3
+HIDDEN_LAYER_NEURONS = 24
 
 class NeuralNetResult(BaseModel):
     weights: list[NpNDArray]
@@ -104,23 +111,28 @@ def inference(weights: list, biases: list, input: np.ndarray) -> np.ndarray:
 
 def neural_net(data: np.ndarray) -> NeuralNetResult:
     """Returns loss and validation loss over steps. (loss type, step)"""
-    validation_set_size = math.floor(N * 0.2)
+    validation_set_size = math.floor(N * VALIDATION_SET_PERCENT)
     validation_set = data[:validation_set_size]
     data = data[validation_set_size:]
 
-    hidden_layer_neurons = 6
-    hidden_layer_count = 2
+    hidden_layer_neurons = HIDDEN_LAYER_NEURONS
+    hidden_layer_count = HIDDEN_LAYERS
 
     feature_count = data.shape[1] - 1 # -1 since the last column is y
+    x = data[:, :2]
     y = data[:, -1]
     rng = default_rng(67)
     weights = []
     biases = []
 
+    best_weights = []
+    best_biases = []
     loss_values = []
     validation_loss_values = []
     smallest_validation_loss_step = 0
     smallest_validation_loss = 9999
+
+    patience_count = 0
 
     for i in range(hidden_layer_count):
         inputs = hidden_layer_neurons if i > 0 else feature_count
@@ -132,26 +144,37 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
 
     for i in range(STEPS):
         # Forward Pass
-        x = data[:, :2]
-        out = x.T
-        layers = len(weights)
-        z_layers = []
+        z_layers, out = forward_pass(x, weights, biases)
 
-        for j in range(layers):
-            input = out
-            out = weights[j] @ input + biases[j][:, np.newaxis]
+        # Loss
+        out = np.squeeze(out)
+        l = loss(y, out)
 
-            z_layers.append(out.copy())
+        validation_out = inference(weights, biases, validation_set[:, :-1])
+        validation_l = loss(validation_set[:, -1] , validation_out)
+        # print(f"{i}. Loss: {l} Validation Loss: {validation_l}")
 
-            if j == layers - 1:
-                out = sigmoid(out)
-            else:
-                out = np.tanh(out)
+        loss_values.append(l)
+        validation_loss_values.append(validation_l)
 
+        if validation_l < smallest_validation_loss:
+            smallest_validation_loss_step = i
+            smallest_validation_loss = validation_l
+            best_biases = copy.deepcopy(biases)
+            best_weights = copy.deepcopy(weights)
+            patience_count = 0
+        else:
+            patience_count += 1
+
+        if patience_count >= PATIENCE:
+            print(f"EXIT AT: {i} with weights from {smallest_validation_loss_step}")
+            biases = best_biases
+            weights = best_weights
+            break
 
         # Backward Pass
         a_in_grad = np.empty
-        lr = 0.5
+        lr = LR / (1 + LR_DECAY_RATE * i)
 
         for li in reversed(range(hidden_layer_count + 1)):
             if li == hidden_layer_count:
@@ -168,32 +191,33 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
                 a_in_grad = z_grad @ weights[li]
             else:
                 a_prev = x
-
             w_grad = z_grad.T @ a_prev
+
             weights[li] -= w_grad * lr
-
-        out = np.squeeze(out)
-        l = loss(data[:, -1], out)
-
-        validation_out = inference(weights, biases, validation_set[:, :-1])
-        validation_l = loss(validation_set[:, -1] , validation_out)
-        # print(f"{i}. Loss: {l} Validation Loss: {validation_l}")
-
-        loss_values.append(l)
-        validation_loss_values.append(validation_l)
-
-        if validation_l < smallest_validation_loss:
-            smallest_validation_loss_step = i
-            smallest_validation_loss = validation_l
-        else:
-            print(f"EXIT AT: {i}")
-            break
 
 
     print(f"Smallest validation loss at step {smallest_validation_loss_step}: {smallest_validation_loss}")
 
     loss_over_steps = np.array([loss_values, validation_loss_values])
     return NeuralNetResult(weights=weights, biases=biases, loss_over_steps=loss_over_steps)
+
+def forward_pass(x: np.ndarray, weights: list[np.ndarray], biases: list[np.ndarray]) -> tuple[list[np.ndarray], np.ndarray]:
+    out = x.T
+    layers = len(weights)
+    z_layers = []
+
+    for j in range(layers):
+        input = out
+        out = weights[j] @ input + biases[j][:, np.newaxis]
+
+        z_layers.append(out.copy())
+
+        if j == layers - 1:
+            out = sigmoid(out)
+        else:
+            out = np.tanh(out)
+
+    return z_layers, out
 
 # Binary Cross Entropy
 def loss(gt: np.ndarray, out: np.ndarray) -> float:
