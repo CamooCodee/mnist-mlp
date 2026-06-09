@@ -9,12 +9,13 @@ from pydantic import BaseModel
 from pydantic_numpy.typing import NpNDArray
 
 N = 5000
-BATCH_SIZE = 120
+BATCH_SIZE = 500
 EPOCHS = 200
 VALIDATION_SET_PERCENT = 0.2
 EPOCHS_PATIENCE = 10
 LR = 0.1
-MOMENTUM_BETA = 0.9
+M_BETA = 0.9
+V_BETA = 0.99
 LR_DECAY_RATE = 0.001
 HIDDEN_LAYERS = 2
 HIDDEN_LAYER_NEURONS = 6
@@ -55,6 +56,8 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
     rng = default_rng(67)
     weights = []
     biases = []
+    m_weights = []
+    m_biases = []
     v_weights = []
     v_biases = []
 
@@ -76,17 +79,25 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
         v_weights.append(np.zeros((hidden_layer_neurons, inputs)))
         v_biases.append(np.zeros(hidden_layer_neurons, dtype=np.float64))
 
+        m_weights.append(np.zeros((hidden_layer_neurons, inputs)))
+        m_biases.append(np.zeros(hidden_layer_neurons, dtype=np.float64))
+
     weights.append(rng.standard_normal((1, hidden_layer_neurons)) * np.sqrt(2.0 / hidden_layer_neurons))
     biases.append(np.array([0], dtype=np.float64))
 
     v_weights.append(np.zeros((1, hidden_layer_neurons)))
     v_biases.append(np.array([0], dtype=np.float64))
+    m_weights.append(np.zeros((1, hidden_layer_neurons)))
+    m_biases.append(np.array([0], dtype=np.float64))
 
     # Training
 
     steps_per_epoch = math.ceil(training_set_size / BATCH_SIZE)
     steps = EPOCHS * steps_per_epoch
 
+    print(f"Learning Rate: {LR}")
+    print(f"Learning Rate Decay: {LR_DECAY_RATE}")
+    print("----------")
     print(f"Dataset Size: {training_set_size}")
     print(f"Batch Size: {BATCH_SIZE}")
     print(f"Epochs: {EPOCHS}")
@@ -106,7 +117,7 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
         z_layers, out = forward_pass(batch_x, weights, biases)
 
         # Backward Pass
-        a_in_grad = np.empty
+        a_in_grad = None
         lr = LR / (1 + LR_DECAY_RATE * i)
 
         for li in reversed(range(hidden_layer_count + 1)):
@@ -117,8 +128,12 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
                 z_grad = relu_gradient(z_layers[li].T) * a_in_grad
 
             b_grad = z_grad.sum(axis=0)
-            v_biases[li] = MOMENTUM_BETA * v_biases[li] + (1 - MOMENTUM_BETA) * np.square(b_grad)
-            biases[li] -= lr * (b_grad / (np.sqrt(v_biases[li] + 1e-8)))
+            m_biases[li] = M_BETA * m_biases[li] + (1 - M_BETA) * b_grad
+            v_biases[li] = V_BETA * v_biases[li] + (1 - V_BETA) * np.square(b_grad)
+
+            m_biases_unbiased = m_biases[li] / (1 - np.pow(M_BETA, i + 1))
+            v_biases_unbiased = v_biases[li] / (1 - np.pow(V_BETA, i + 1))
+            biases[li] -= lr * (m_biases_unbiased / (np.sqrt(v_biases_unbiased) + 1e-8))
 
             if li > 0:
                 a_prev = np.maximum(0, z_layers[li - 1]).T
@@ -127,8 +142,12 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
                 a_prev = batch_x
 
             w_grad = z_grad.T @ a_prev
-            v_weights[li] = MOMENTUM_BETA * v_weights[li] + (1 - MOMENTUM_BETA) * np.square(w_grad)
-            weights[li] -= lr * (w_grad / (np.sqrt(v_weights[li] + 1e-8)))
+            m_weights[li] = M_BETA * m_weights[li] + (1 - M_BETA) * w_grad
+            v_weights[li] = V_BETA * v_weights[li] + (1 - V_BETA) * np.square(w_grad)
+
+            m_weights_unbiased = m_weights[li] / (1 - np.pow(M_BETA, i + 1))
+            v_weights_unbiased = v_weights[li] / (1 - np.pow(V_BETA, i + 1))
+            weights[li] -= lr * (m_weights_unbiased / (np.sqrt(v_weights_unbiased) + 1e-8))
 
         # New Loss
         out = np.squeeze(out)
@@ -155,6 +174,8 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
             if patience_count >= EPOCHS_PATIENCE:
                 print(f"EXIT AT: {i} with weights from {smallest_validation_loss_step}")
                 break
+
+            rng.shuffle(data)
 
     biases = best_biases
     weights = best_weights
