@@ -8,22 +8,23 @@ from numpy.random import default_rng
 from pydantic import BaseModel
 from pydantic_numpy.typing import NpNDArray
 
-N = 5000
-BATCH_SIZE = 500
+N = 2500
+BATCH_SIZE = 250
 EPOCHS = 200
 VALIDATION_SET_PERCENT = 0.2
-EPOCHS_PATIENCE = 10
-LR = 0.1
+EPOCHS_PATIENCE = 5
+LR = 0.05
 M_BETA = 0.9
 V_BETA = 0.99
-LR_DECAY_RATE = 0.001
+LR_DECAY_RATE = 0.005
 HIDDEN_LAYERS = 2
 HIDDEN_LAYER_NEURONS = 6
 
 class NeuralNetResult(BaseModel):
     weights: list[NpNDArray]
     biases: list[NpNDArray]
-    loss_over_steps: NpNDArray
+    loss_over_epochs: NpNDArray
+    accuracy_over_epochs: NpNDArray
 
 def inference(weights: list, biases: list, input: np.ndarray) -> np.ndarray:
     out = input.T
@@ -65,6 +66,8 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
     best_biases = []
     loss_values = []
     validation_loss_values = []
+    accuracy_values = []
+    best_accuracy = 0
     smallest_validation_loss_step = 0
     smallest_validation_loss = 9999
 
@@ -162,12 +165,18 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
             validation_l = loss(validation_set[:, -1], validation_out)
             validation_loss_values.append(validation_l)
 
+            correct_predictions = np.count_nonzero((validation_out > 0.5) == validation_set[:, -1])
+            accuracy = correct_predictions / validation_set.shape[0]
+
+            accuracy_values.append(accuracy)
+
             if validation_l < smallest_validation_loss:
                 smallest_validation_loss_step = i + 1
                 smallest_validation_loss = validation_l
                 best_biases = copy.deepcopy(biases)
                 best_weights = copy.deepcopy(weights)
                 patience_count = 0
+                best_accuracy = accuracy
             else:
                 patience_count += 1
 
@@ -179,10 +188,12 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
 
     biases = best_biases
     weights = best_weights
-    print(f"Smallest validation loss at step {smallest_validation_loss_step} and epoch {smallest_validation_loss_step / steps_per_epoch}: {smallest_validation_loss}")
+    print(f"Best validation loss at step {smallest_validation_loss_step} and epoch {smallest_validation_loss_step / steps_per_epoch}: {smallest_validation_loss}")
+    print(f"Best accuracy: {best_accuracy}")
 
     loss_over_steps = np.array([loss_values, validation_loss_values])
-    return NeuralNetResult(weights=weights, biases=biases, loss_over_steps=loss_over_steps)
+    accuracy_over_epochs = np.array(accuracy_values)
+    return NeuralNetResult(weights=weights, biases=biases, loss_over_epochs=loss_over_steps, accuracy_over_epochs=accuracy_over_epochs)
 
 def forward_pass(x: np.ndarray, weights: list[np.ndarray], biases: list[np.ndarray]) -> tuple[list[np.ndarray], np.ndarray]:
     out = x.T
@@ -218,8 +229,8 @@ def logit(x):
     return np.log(x / (1-x))
 
 def main():
-    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(18, 8))
-    data = sklearn.datasets.make_moons(n_samples=N, noise=0.2, random_state=68)
+    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(15, 11))
+    data = sklearn.datasets.make_moons(n_samples=N, noise=0.225, random_state=68)
     (x, y) = data
     npdata = np.column_stack(data)
 
@@ -238,7 +249,6 @@ def main():
 
     print(x.shape)
 
-    axes[0].scatter(x=x[:, 0], y=x[:, 1], c=c, s=6)
 
     print("-- Data")
     print(npdata.shape)
@@ -247,43 +257,41 @@ def main():
     result = neural_net(npdata)
     biases = result.biases
     weights = result.weights
-    l = result.loss_over_steps
+    l = result.loss_over_epochs
+    acc = result.accuracy_over_epochs
 
     biases[0] = biases[0] - (weights[0] @ (mean / std))
     weights[0] /= std
 
-    print("\n\n")
+    epochs = np.arange(0, l.shape[1])
+    axes[0, 1].set_xlabel('epochs')
+    axes[0, 1].set_ylabel('loss')
+    axes[0, 1].plot(epochs, l[0, :], color="blue")
+    axes[0, 1].plot(epochs, l[1, :], color="green")
 
-    inputs = np.array([
-        # [2.5, -0.1],
-        # [1, -0.1],
-        # [1, -0.25],
-        # [1, -0.35],
-        # [0.07, 0.6],
-        # [-0.6, -0.12],
-        # [-0.4, 0.235],
-        # [-0.2, 0.532],
-        # [0, 0.645],
-        [0.2, 0.562],
-        # [0.4, 0.37],
-        # [0.6, 0.14],
-        # [0.9, -0.12],
-        # [1.2, -0.05],
-        # [1.5, 0.43],
-        # [1.7, 0.79],
-    ])
+    epochs = np.arange(0, acc.shape[0])
+    axes[1, 0].set_xlabel('epochs')
+    axes[1, 0].set_ylabel('accuracy')
+    axes[1, 0].plot(epochs, acc, color="green")
 
-    for i in inputs:
-        i = i[np.newaxis, :]
-        print(i)
-        result = inference(weights, biases, i).item()
-        print(f"Inference result for {i}: {result}")
+    x1_min = x[:, 0].min()
+    x1_max = x[:, 0].max()
+    x2_min = x[:, 1].min()
+    x2_max = x[:, 1].max()
 
-    axes[0].scatter(x=inputs[:, 0], y=inputs[:, 1], c="orange", s=12)
+    x1 = np.arange(x1_min, x1_max + 0.1, 0.1)
+    x2 = np.arange(x2_min, x2_max + 0.1, 0.1)
+    x1_contour, x2_contour = np.meshgrid(x1, x2)
 
-    steps = np.arange(0, l.shape[1])
-    axes[1].plot(steps, l[0, :], color="blue")
-    axes[1].plot(steps, l[1, :], color="green")
+    x1_joined = x1_contour.flatten()
+    x2_joined = x2_contour.flatten()
+    x_grid = np.array([x1_joined, x2_joined]).T
+    contour_results = inference(weights, biases, x_grid)
+
+    y_contour = contour_results.reshape(-1, x1_contour.shape[1])
+
+    axes[0, 0].contourf(x1_contour, x2_contour, y_contour, alpha=0.5, cmap="RdYlGn")
+    axes[0, 0].scatter(x=x[:, 0], y=x[:, 1], c=c, s=6, alpha=0.5)
 
     plt.show()
 
