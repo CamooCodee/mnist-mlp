@@ -125,10 +125,9 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
 
         for li in reversed(range(hidden_layer_count + 1)):
             if li == hidden_layer_count:
-                z_grad = (sigmoid(z_layers[li]) - batch_y) / batch_x.shape[0]
-                z_grad = z_grad.T
+                z_grad = (sigmoid(z_layers[li]) - batch_y[:, np.newaxis]) / batch_x.shape[0]
             else:
-                z_grad = relu_gradient(z_layers[li].T) * a_in_grad
+                z_grad = relu_gradient(z_layers[li]) * a_in_grad
 
             b_grad = z_grad.sum(axis=0)
             m_biases[li] = M_BETA * m_biases[li] + (1 - M_BETA) * b_grad
@@ -139,7 +138,7 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
             biases[li] -= lr * (m_biases_unbiased / (np.sqrt(v_biases_unbiased) + 1e-8))
 
             if li > 0:
-                a_prev = np.maximum(0, z_layers[li - 1]).T
+                a_prev = np.maximum(0, z_layers[li - 1])
                 a_in_grad = z_grad @ weights[li]
             else:
                 a_prev = batch_x
@@ -196,13 +195,13 @@ def neural_net(data: np.ndarray) -> NeuralNetResult:
     return NeuralNetResult(weights=weights, biases=biases, loss_over_epochs=loss_over_steps, accuracy_over_epochs=accuracy_over_epochs)
 
 def forward_pass(x: np.ndarray, weights: list[np.ndarray], biases: list[np.ndarray]) -> tuple[list[np.ndarray], np.ndarray]:
-    out = x.T
+    out = x
     layers = len(weights)
     z_layers = []
 
     for j in range(layers):
         input = out
-        out = weights[j] @ input + biases[j][:, np.newaxis]
+        out = input @ weights[j].T + biases[j][np.newaxis, :]
 
         z_layers.append(out.copy())
 
