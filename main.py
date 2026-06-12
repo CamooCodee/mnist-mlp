@@ -1,6 +1,8 @@
 import copy
 import math
+from pathlib import Path
 
+import cv2
 import pandas as pd
 from sklearn.datasets import fetch_openml
 import matplotlib.pyplot as plt
@@ -290,23 +292,36 @@ def main():
     x /= x.max()
     print(x.max())
 
-    #
-    # mean = features.mean(axis=0)
-    # std = features.std(axis=0)
-    #
-    # features -= mean
-    # features /= std
-    #
     result = neural_net(npdata)
-    # biases = result.biases
-    # weights = result.weights
+    biases = result.biases
+    weights = result.weights
     l = result.loss_over_epochs
     acc = result.accuracy_over_epochs
 
-    # biases[0] = biases[0] - (weights[0] @ (mean / std))
-    # weights[0] /= std
+    image_dir = Path("my-numbers")
 
-    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(15, 8))
+    test_images = []
+
+    for file_path in image_dir.iterdir():
+        if file_path.suffix.lower() == ".png":
+            img = cv2.imread(str(file_path), cv2.IMREAD_GRAYSCALE)
+
+            if img is not None:
+                img = cv2.resize(img, (28, 28))
+                img_normalized = img / 255
+                img_reshaped = img_normalized.reshape(1, 784)
+                test_images.append({"img": img_reshaped, "name": file_path.name})
+                print(f"Loaded test image: {file_path.name} | Shape: {img.shape}")
+
+    for test in test_images:
+        out = np.squeeze(inference(weights, biases, test["img"]))
+        test_out_str = ""
+        for i, n in enumerate(out):
+            test_out_str += f"{i}: {n:.3f} | "
+
+        print(f"{test["name"]}: {test_out_str}")
+
+    _, axes = plt.subplots(nrows=1, ncols=2, figsize=(15, 8))
     epochs = np.arange(0, l.shape[1])
     axes[0].set_xlabel('epochs')
     axes[0].set_ylabel('loss')
