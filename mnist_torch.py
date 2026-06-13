@@ -56,8 +56,8 @@ def main():
     loader = DataLoader(train_set, shuffle=True, batch_size=64)
 
     LR_DECAY = 0.0001
-    NUM_EPOCHS = 25
-    PATIENCE_EPOCHS = 5
+    NUM_EPOCHS = 100
+    PATIENCE_EPOCHS = 6
 
     best_val_loss = torch.finfo(torch.float32).max
     best_val_loss_epoch = 0
